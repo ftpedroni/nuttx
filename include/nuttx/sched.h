@@ -98,6 +98,16 @@
 #  define TCB_FLAG_SCHED_FIFO      (0 << TCB_FLAG_POLICY_SHIFT)  /* FIFO scheding policy */
 #  define TCB_FLAG_SCHED_RR        (1 << TCB_FLAG_POLICY_SHIFT)  /* Round robin scheding policy */
 #  define TCB_FLAG_SCHED_SPORADIC  (2 << TCB_FLAG_POLICY_SHIFT)  /* Sporadic scheding policy */
+
+/* Encoding 3 is reserved for a future uniprocessor SCHED_DEADLINE.
+ * The macro is compiled only with CONFIG_SCHED_DEADLINE. Nothing in
+ * this tree stores it in a TCB: sched_setscheduler() does not accept
+ * the policy, and task creation still writes FIFO, RR, or sporadic.
+ */
+
+#ifdef CONFIG_SCHED_DEADLINE
+#  define TCB_FLAG_SCHED_DEADLINE  (3 << TCB_FLAG_POLICY_SHIFT)
+#endif
 #define TCB_FLAG_CPU_LOCKED        (1 << 5)                      /* Bit 5: Locked to this CPU */
 #define TCB_FLAG_SIGNAL_ACTION     (1 << 6)                      /* Bit 6: In a signal handler */
 #define TCB_FLAG_SYSCALL           (1 << 7)                      /* Bit 7: In a system call */
