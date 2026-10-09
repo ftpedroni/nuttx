@@ -654,6 +654,16 @@ config SPORADIC_INSTRUMENTATION
 
 endif # SCHED_SPORADIC
 
+config SCHED_DEADLINE
+	bool "Support deadline scheduling"
+	default n
+	depends on !SMP
+	---help---
+		Reserve a policy encoding for a future uniprocessor EDF/CBS
+		SCHED_DEADLINE implementation. This option does not activate
+		the policy: sched_setscheduler() rejects SCHED_DEADLINE, and
+		no task is created with the deadline encoding.
+
 config TASK_NAME_SIZE
 	int "Maximum task name size"
 	default 31
