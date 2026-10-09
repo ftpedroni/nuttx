@@ -72,7 +72,6 @@ int nxsched_get_scheduler(pid_t pid)
 {
   FAR struct tcb_s *tcb;
   int ret = -ESRCH;
-  int policy;
 
   /* Verify that the PID corresponds to a real task */
 
@@ -87,13 +86,44 @@ int nxsched_get_scheduler(pid_t pid)
 
   if (tcb != NULL)
     {
+#ifdef CONFIG_SCHED_DEADLINE
+      /* Internal codes 0, 1, and 2 stay SCHED_FIFO, SCHED_RR, and
+       * SCHED_SPORADIC. Code 3 is SCHED_DEADLINE (6). policy + 1 would
+       * report that code as SCHED_BATCH (4). No task stores code 3 yet.
+       */
+
+      switch (tcb->flags & TCB_FLAG_POLICY_MASK)
+        {
+          case TCB_FLAG_SCHED_FIFO:
+            ret = SCHED_FIFO;
+            break;
+
+          case TCB_FLAG_SCHED_RR:
+            ret = SCHED_RR;
+            break;
+
+          case TCB_FLAG_SCHED_SPORADIC:
+            ret = SCHED_SPORADIC;
+            break;
+
+          case TCB_FLAG_SCHED_DEADLINE:
+            ret = SCHED_DEADLINE;
+            break;
+
+          default:
+            ret = -EINVAL;
+            break;
+        }
+#else
       /* Return the scheduling policy from the TCB.  NOTE that the user-
        * interpretable values are 1 based; the TCB values are zero-based.
        */
 
-      policy = (tcb->flags & TCB_FLAG_POLICY_MASK) >> TCB_FLAG_POLICY_SHIFT;
+      int policy = (tcb->flags & TCB_FLAG_POLICY_MASK) >>
+                   TCB_FLAG_POLICY_SHIFT;
 
       ret = policy + 1;
+#endif
     }
 
   return ret;
