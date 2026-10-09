@@ -50,6 +50,13 @@
 #define SCHED_SPORADIC            3  /* Sporadic scheduling policy */
 #define SCHED_BATCH               4  /* Batch scheduling policy */
 #define SCHED_IDLE                5  /* Idle scheduling policy */
+#define SCHED_DEADLINE            6  /* Deadline scheduling policy */
+
+/* SCHED_DEADLINE is always visible so callers can name policy 6.
+ * It is not a selectable policy yet: sched_setscheduler() rejects it,
+ * and no TCB is created with the deadline encoding. The parameters
+ * and the EDF/CBS engine are intentionally absent.
+ */
 
 /* Maximum number of SCHED_SPORADIC replenishments */
 
