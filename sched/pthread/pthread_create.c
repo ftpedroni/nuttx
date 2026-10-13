@@ -321,6 +321,18 @@ int nx_pthread_create(pthread_trampoline_t trampoline, FAR pthread_t *thread,
 #endif
     }
 
+#ifdef CONFIG_SCHED_DEADLINE
+  /* Inheriting or requesting SCHED_DEADLINE would publish a child with
+   * no reservation. Refuse before the child is started.
+   */
+
+  if (policy == SCHED_DEADLINE)
+    {
+      ret = -EAGAIN;
+      goto errout_with_tcb;
+    }
+#endif
+
 #ifdef CONFIG_SCHED_SPORADIC
   if (policy == SCHED_SPORADIC)
     {

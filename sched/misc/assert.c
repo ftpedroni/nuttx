@@ -121,7 +121,7 @@ static uintptr_t g_last_regs[CONFIG_SMP_NCPUS][XCPTCONTEXT_REGS]
 #ifdef CONFIG_SCHED_DUMP_TASKS
 static FAR const char * const g_policy[4] =
 {
-  "FIFO", "RR", "SPORADIC"
+  "FIFO", "RR", "SPORADIC", "DEADLINE"
 };
 
 static FAR const char * const g_ttypenames[4] =

@@ -214,6 +214,19 @@ FAR struct tcb_s *nxtask_setup_fork(start_t retaddr, bool vfork)
         }
     }
 
+#ifdef CONFIG_SCHED_DEADLINE
+  /* A deadline parent must not copy its reservation into a child.
+   * Reject before the child TCB is allocated.
+   */
+
+  if ((ptcb->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_DEADLINE ||
+      (parent->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_DEADLINE)
+    {
+      ret = -EAGAIN;
+      goto errout;
+    }
+#endif
+
   /* Allocate a TCB for the child task. */
 
   child = kmm_zalloc(sizeof(struct tcb_s));

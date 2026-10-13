@@ -83,6 +83,9 @@ void nxsched_get_stateinfo(FAR struct tcb_s *tcb, FAR char *state,
 #ifdef CONFIG_SIG_SIGSTOP_ACTION
       , "Stopped"
 #endif
+#ifdef CONFIG_SCHED_DEADLINE
+      , "Waiting,Deadline"
+#endif
     };
 
 #ifdef CONFIG_ARCH_ADDRENV

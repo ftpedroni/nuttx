@@ -167,7 +167,7 @@ struct proc_envinfo_s
 
 static FAR const char * const g_policy[4] =
 {
-  "SCHED_FIFO", "SCHED_RR", "SCHED_SPORADIC"
+  "SCHED_FIFO", "SCHED_RR", "SCHED_SPORADIC", "SCHED_DEADLINE"
 };
 
 /****************************************************************************

@@ -94,4 +94,13 @@ void nxtask_recover(FAR struct tcb_s *tcb)
       DEBUGVERIFY(nxsched_stop_sporadic(tcb));
     }
 #endif
+
+#ifdef CONFIG_SCHED_DEADLINE
+  /* Idempotent. Cancels the replenishment watchdog and drops a
+   * bandwidth reservation once, if this task owns one. A second call
+   * sees a NULL deadline pointer and does not touch the ledger.
+   */
+
+  nxsched_deadline_stop(tcb);
+#endif
 }
