@@ -68,6 +68,10 @@ ifeq ($(CONFIG_SCHED_SPORADIC),y)
 CSRCS += sched_sporadic.c
 endif
 
+ifeq ($(CONFIG_SCHED_DEADLINE),y)
+CSRCS += sched_deadline.c sched_deadline_cbs.c sched_deadline_admit.c
+endif
+
 ifneq ($(CONFIG_SCHED_CPULOAD_NONE),y)
 CSRCS += sched_cpuload.c
 ifeq ($(CONFIG_CPULOAD_ONESHOT),y)

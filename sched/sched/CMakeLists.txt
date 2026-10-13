@@ -84,6 +84,10 @@ endif()
 
 if(CONFIG_SCHED_SPORADIC)
   list(APPEND SRCS sched_sporadic.c)
+endif
+
+if(CONFIG_SCHED_DEADLINE)
+  list(APPEND SRCS sched_deadline.c sched_deadline_cbs.c sched_deadline_admit.c)
 endif()
 
 if(NOT CONFIG_SCHED_CPULOAD_NONE)
