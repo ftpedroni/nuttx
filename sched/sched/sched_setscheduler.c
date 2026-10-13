@@ -187,6 +187,28 @@ int nxsched_set_scheduler(pid_t pid, int policy,
 
           flags = enter_critical_section();
 
+#ifdef CONFIG_SCHED_DEADLINE
+          /* Dropping the deadline policy has to release the reservation
+           * before the flag is cleared. A throttled task is not on the
+           * ready list, so put it back before reprioritize runs.
+           */
+
+          if ((tcb->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_DEADLINE)
+            {
+              if (tcb->task_state == TSTATE_WAIT_DLTHROTTLE)
+                {
+                  nxsched_remove_blocked(tcb);
+                }
+
+              nxsched_deadline_release(tcb);
+              tcb->flags &= ~TCB_FLAG_POLICY_MASK;
+              if (tcb->task_state == TSTATE_TASK_INVALID)
+                {
+                  nxsched_add_readytorun(tcb);
+                }
+            }
+#endif
+
           switch (policy)
             {
               case SCHED_FIFO:

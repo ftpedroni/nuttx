@@ -87,7 +87,12 @@ static inline void nxsched_running_setpriority(FAR struct tcb_s *tcb,
   if (nxttcb && (sched_priority <= nxttcb->sched_priority ||
       (tcb->affinity & (1 << tcb->cpu)) == 0))
 #else
+#  ifdef CONFIG_SCHED_DEADLINE
+  if (nxttcb &&
+      nxsched_deadline_outranks_priority(nxttcb, sched_priority, true))
+#  else
   if (nxttcb && sched_priority <= nxttcb->sched_priority)
+#  endif
 #endif
     {
 #ifdef CONFIG_SMP
@@ -130,12 +135,21 @@ static inline void nxsched_running_setpriority(FAR struct tcb_s *tcb,
               DEBUGASSERT(check == false);
               UNUSED(check);
 
+#ifdef CONFIG_SCHED_DEADLINE
+              nxsched_add_runnable(nxttcb, list_pendingtasks());
+#else
               nxsched_add_prioritized(nxttcb, list_pendingtasks());
+#endif
               nxttcb->task_state = TSTATE_TASK_PENDING;
 
               nxttcb = tcb->flink;
             }
+#ifdef CONFIG_SCHED_DEADLINE
+          while (nxsched_deadline_outranks_priority(nxttcb, sched_priority,
+                                                    false));
+#else
           while (sched_priority < nxttcb->sched_priority);
+#endif
 
           /* Change the task priority */
 
@@ -234,9 +248,21 @@ static inline void nxsched_blocked_setpriority(FAR struct tcb_s *tcb,
 
       tcb->sched_priority = (uint8_t)sched_priority;
 
-      /* Put it back into the prioritized list at the correct position. */
+      /* Put it back into the prioritized list at the correct position.
+       * Only the pending runnable list uses deadline order. Semaphore,
+       * event, and message-queue waits stay on nxsched_add_prioritized().
+       */
 
-      nxsched_add_prioritized(tcb, tasklist);
+#ifdef CONFIG_SCHED_DEADLINE
+      if (task_state == TSTATE_TASK_PENDING)
+        {
+          nxsched_add_runnable(tcb, tasklist);
+        }
+      else
+#endif
+        {
+          nxsched_add_prioritized(tcb, tasklist);
+        }
     }
 
   /* CASE 3b. The task resides in a non-prioritized list. */
@@ -297,6 +323,32 @@ int nxsched_set_priority(FAR struct tcb_s *tcb, int sched_priority)
        */
 
       flags = enter_critical_section();
+
+#ifdef CONFIG_SCHED_DEADLINE
+      /* sched_priority does not order an eligible deadline task. Update
+       * the number and leave the ready and pending lists where they are.
+       * A blocked deadline task still moves inside a priority wait queue.
+       * An incomplete deadline key is rejected rather than queued as FIFO.
+       */
+
+      if ((tcb->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_DEADLINE)
+        {
+          if (!nxsched_deadline_eligible(tcb))
+            {
+              leave_critical_section(flags);
+              return -EINVAL;
+            }
+
+          if (tcb->task_state == TSTATE_TASK_RUNNING ||
+              tcb->task_state == TSTATE_TASK_READYTORUN ||
+              tcb->task_state == TSTATE_TASK_PENDING)
+            {
+              tcb->sched_priority = (uint8_t)sched_priority;
+              leave_critical_section(flags);
+              return OK;
+            }
+        }
+#endif
 
       /* There are three major cases (and two sub-cases) that must be
        * considered:

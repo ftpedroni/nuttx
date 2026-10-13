@@ -71,6 +71,28 @@ bool nxsched_add_readytorun(FAR struct tcb_s *btcb)
   FAR struct tcb_s *rtcb = this_task();
   bool ret;
 
+#ifdef CONFIG_SCHED_DEADLINE
+  /* One block-to-runnable edge. A task that is already eligible
+   * (preemption, pending merge is not this function) is unchanged.
+   * A throttled task is put back on the throttle queue: the caller
+   * has already unlinked it from the wait it just finished.
+   */
+
+  nxsched_deadline_woken(btcb);
+  if ((btcb->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_DEADLINE &&
+      !nxsched_deadline_eligible(btcb))
+    {
+      if (btcb->deadline != NULL &&
+          btcb->deadline->sched == DL_SCHED_THROTTLED &&
+          btcb->flink == NULL && btcb->blink == NULL)
+        {
+          nxsched_add_blocked(btcb, TSTATE_WAIT_DLTHROTTLE);
+        }
+
+      return false;
+    }
+#endif
+
   /* Check if pre-emption is disabled for the current running task and if
    * the new ready-to-run task would cause the current running task to be
    * preempted.  NOTE that IRQs disabled implies that pre-emption is
@@ -78,20 +100,35 @@ bool nxsched_add_readytorun(FAR struct tcb_s *btcb)
    */
 
   if (nxsched_islocked_tcb(rtcb) &&
-      rtcb->sched_priority < btcb->sched_priority)
+#ifdef CONFIG_SCHED_DEADLINE
+      nxsched_runnable_precedes(btcb, rtcb)
+#else
+      rtcb->sched_priority < btcb->sched_priority
+#endif
+     )
     {
       /* Yes.  Preemption would occur!  Add the new ready-to-run task to the
        * g_pendingtasks task list for now.
        */
 
+#ifdef CONFIG_SCHED_DEADLINE
+      nxsched_add_runnable(btcb, list_pendingtasks());
+#else
       nxsched_add_prioritized(btcb, list_pendingtasks());
+#endif
       btcb->task_state = TSTATE_TASK_PENDING;
       ret = false;
     }
 
   /* Otherwise, add the new task to the ready-to-run task list */
 
-  else if (nxsched_add_prioritized(btcb, list_readytorun()))
+  else if (
+#ifdef CONFIG_SCHED_DEADLINE
+           nxsched_add_runnable(btcb, list_readytorun())
+#else
+           nxsched_add_prioritized(btcb, list_readytorun())
+#endif
+          )
     {
       /* The new btcb was added at the head of the ready-to-run list.  It
        * is now the new active task!

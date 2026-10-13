@@ -61,6 +61,111 @@
  *
  ****************************************************************************/
 
+#ifdef CONFIG_SCHED_DEADLINE
+
+/****************************************************************************
+ * Name: nxsched_merge_runnable
+ *
+ * Description:
+ *   Merge a pending queue into a ready queue using the runnable order.
+ *   This is the body of nxsched_merge_pending(). The test calls it with
+ *   private queues and update_current false so up_update_task() is not
+ *   invoked. Both queues must already be ordered by that same predicate.
+ *   An ineligible deadline TCB is not spliced onto the ready queue.
+ *
+ *   Does not call nxsched_add_readytorun(). That function also applies
+ *   the scheduler lock and would re-pending the task being merged.
+ *
+ ****************************************************************************/
+
+bool nxsched_merge_runnable(FAR dq_queue_t *readylist,
+                            FAR dq_queue_t *pendinglist,
+                            bool update_current)
+{
+  FAR struct tcb_s *ptcb;
+  FAR struct tcb_s *pnext;
+  FAR struct tcb_s *rtcb;
+  FAR struct tcb_s *rprev;
+  bool ret = false;
+
+  rtcb = (FAR struct tcb_s *)readylist->head;
+
+  for (ptcb = (FAR struct tcb_s *)pendinglist->head; ptcb; ptcb = pnext)
+    {
+      pnext = ptcb->flink;
+
+      if ((ptcb->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_DEADLINE &&
+          !nxsched_deadline_eligible(ptcb))
+        {
+          ptcb->flink = NULL;
+          ptcb->blink = NULL;
+          continue;
+        }
+
+      /* Search ahead. Both lists use nxsched_runnable_precedes(), so a
+       * later pending task cannot belong before the node just inserted.
+       */
+
+      for (;
+           rtcb != NULL && !nxsched_runnable_precedes(ptcb, rtcb);
+           rtcb = rtcb->flink)
+        {
+        }
+
+      /* Idle remains on the ready list, so the search must stop. */
+
+      DEBUGASSERT(rtcb);
+
+      rprev = rtcb->blink;
+      if (rprev == NULL)
+        {
+          ptcb->flink = rtcb;
+          ptcb->blink = NULL;
+          rtcb->blink = ptcb;
+          readylist->head = (FAR dq_entry_t *)ptcb;
+          rtcb->task_state = TSTATE_TASK_READYTORUN;
+          ptcb->task_state = TSTATE_TASK_RUNNING;
+          if (update_current)
+            {
+              up_update_task(ptcb);
+            }
+
+          ret = true;
+        }
+      else
+        {
+          ptcb->flink = rtcb;
+          ptcb->blink = rprev;
+          rprev->flink = ptcb;
+          rtcb->blink = ptcb;
+          ptcb->task_state = TSTATE_TASK_READYTORUN;
+        }
+
+      rtcb = ptcb;
+    }
+
+  pendinglist->head = NULL;
+  pendinglist->tail = NULL;
+  return ret;
+}
+
+bool nxsched_merge_pending(void)
+{
+  FAR struct tcb_s *rtcb = this_task();
+
+  /* Do nothing if pre-emption is still disabled. */
+
+  if (nxsched_islocked_tcb(rtcb))
+    {
+      return false;
+    }
+
+  return nxsched_merge_runnable(list_readytorun(), list_pendingtasks(),
+                                true);
+}
+
+#else /* CONFIG_SCHED_DEADLINE */
+
 bool nxsched_merge_pending(void)
 {
   FAR struct tcb_s *ptcb;
@@ -150,3 +255,5 @@ bool nxsched_merge_pending(void)
 
   return ret;
 }
+
+#endif /* CONFIG_SCHED_DEADLINE */

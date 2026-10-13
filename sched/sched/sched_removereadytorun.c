@@ -104,6 +104,13 @@ bool nxsched_remove_readytorun(FAR struct tcb_s *rtcb)
 
 void nxsched_remove_self(FAR struct tcb_s *tcb)
 {
+#ifdef CONFIG_SCHED_DEADLINE
+  /* Close this job before the TCB leaves the ready list. Callers then
+   * queue the wait themselves. remove_readytorun() stays a pure unlink.
+   */
+
+  nxsched_deadline_blocked(tcb);
+#endif
   nxsched_remove_readytorun(tcb);
   if (list_pendingtasks()->head)
     {
