@@ -423,3 +423,13 @@ SYSCALL_LOOKUP(signal,                     2)
   SYSCALL_LOOKUP(sched_note_vprintf_ip,    5)
   SYSCALL_LOOKUP(sched_note_event_ip,      5)
 #endif
+
+/* Appended so existing SYS_* numbers stay stable. Present only when
+ * the option is on, so a deadline-off build keeps the previous
+ * SYS_maxsyscall.
+ */
+
+#ifdef CONFIG_SCHED_DEADLINE
+SYSCALL_LOOKUP(sched_getattr,              4)
+SYSCALL_LOOKUP(sched_setattr,              3)
+#endif
