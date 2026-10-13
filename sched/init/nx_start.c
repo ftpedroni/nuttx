@@ -157,6 +157,12 @@ dq_queue_t g_stoppedtasks;
 
 dq_queue_t g_inactivetasks;
 
+#ifdef CONFIG_SCHED_DEADLINE
+/* Tasks whose CBS budget is exhausted. Not the ready list. */
+
+dq_queue_t g_dlthrottled;
+#endif
+
 /* This is the value of the last process ID assigned to a task */
 
 volatile pid_t g_lastpid;
@@ -313,6 +319,15 @@ static void tasklist_initialize(void)
 
   tlist[TSTATE_TASK_STOPPED].list = list_stoppedtasks();
   tlist[TSTATE_TASK_STOPPED].attr = 0;
+
+#endif
+
+#ifdef CONFIG_SCHED_DEADLINE
+
+  /* TSTATE_WAIT_DLTHROTTLE. Not a priority queue and not runnable. */
+
+  tlist[TSTATE_WAIT_DLTHROTTLE].list = list_dlthrottled();
+  tlist[TSTATE_WAIT_DLTHROTTLE].attr = 0;
 
 #endif
 }

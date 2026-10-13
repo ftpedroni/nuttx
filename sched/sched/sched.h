@@ -211,6 +211,30 @@ extern struct tcb_s g_idletcb[CONFIG_SMP_NCPUS];
 extern dq_queue_t g_pendingtasks;
 #endif
 
+#ifdef CONFIG_SCHED_DEADLINE
+extern dq_queue_t g_dlthrottled;
+#  define list_dlthrottled()       (&g_dlthrottled)
+void nxsched_deadline_tick(bool switch_ok);
+void nxsched_deadline_arm_budget(FAR struct tcb_s *tcb);
+void nxsched_deadline_switch(FAR struct tcb_s *from, FAR struct tcb_s *to);
+bool nxsched_deadline_release_lock(FAR struct tcb_s *tcb);
+void nxsched_deadline_stop(FAR struct tcb_s *tcb);
+void nxsched_deadline_blocked(FAR struct tcb_s *tcb);
+void nxsched_deadline_woken(FAR struct tcb_s *tcb);
+void nxsched_deadline_arm_job(FAR struct tcb_s *tcb);
+bool nxsched_deadline_yield(FAR struct tcb_s *tcb);
+clock_t nxsched_deadline_timeslice(FAR struct tcb_s *tcb);
+int nxsched_deadline_reserve(FAR struct tcb_s *tcb, uint64_t runtime_ns,
+                            uint64_t deadline_ns, uint64_t period_ns);
+int nxsched_deadline_release(FAR struct tcb_s *tcb);
+uint32_t nxsched_deadline_admitted_ppm(void);
+int nxsched_deadline_charge_ppm(uint64_t runtime_ns, uint64_t period_ns,
+                               FAR uint32_t *charge);
+#ifdef CONFIG_TESTING_DEADLINE
+void nxsched_deadline_admit_fail_next(void);
+#endif
+#endif
+
 /* This is the list of all tasks that are blocked waiting for a signal */
 
 extern dq_queue_t g_waitingforsignal;
@@ -333,6 +357,11 @@ void nxtask_resume_vfork(FAR struct tcb_s *child);
 #endif
 #ifndef CONFIG_SMP
 bool nxsched_merge_pending(void);
+#ifdef CONFIG_SCHED_DEADLINE
+bool nxsched_merge_runnable(FAR dq_queue_t *readylist,
+                            FAR dq_queue_t *pendinglist,
+                            bool update_current);
+#endif
 bool nxsched_reprioritize_rtr(FAR struct tcb_s *tcb, int priority);
 #endif
 
@@ -552,6 +581,190 @@ static inline_function bool nxsched_add_prioritized(FAR struct tcb_s *tcb,
 
   return ret;
 }
+
+#ifdef CONFIG_SCHED_DEADLINE
+
+/* True when the TCB may stand in a runnable queue as a deadline task.
+ * Requires the policy bit, a complete key, and DL_SCHED_ELIGIBLE.
+ * THROTTLED is not eligible. THROTTLE_PENDING stays ELIGIBLE until
+ * unlock applies it. This is not a claim that q is still positive.
+ */
+
+static inline_function bool
+nxsched_deadline_eligible(FAR const struct tcb_s *tcb)
+{
+  FAR const struct deadline_s *dl = tcb->deadline;
+
+  return (tcb->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_DEADLINE &&
+         dl != NULL &&
+         (dl->flags & DEADLINE_FLAG_KEY_VALID) != 0 &&
+         dl->sched == DL_SCHED_ELIGIBLE;
+}
+
+/* Return true when a must stand ahead of b in a runnable or pending
+ * queue. Equal keys return false so the existing node keeps its place
+ * (FIFO). Idle is last even if its priority is compared.
+ *
+ * Preconditions: a deadline-flagged argument is either eligible or is
+ * rejected by nxsched_add_runnable() before this result is used to
+ * insert it. An ineligible deadline TCB does not precede anyone.
+ */
+
+static inline_function bool
+nxsched_runnable_precedes(FAR const struct tcb_s *a,
+                          FAR const struct tcb_s *b)
+{
+  bool a_dl;
+  bool b_dl;
+
+  if (is_idle_task(a))
+    {
+      return false;
+    }
+
+  if (is_idle_task(b))
+    {
+      return true;
+    }
+
+  a_dl = nxsched_deadline_eligible(a);
+  b_dl = nxsched_deadline_eligible(b);
+
+  /* An incomplete deadline TCB is not a fixed-priority task and does
+   * not win the comparison. Callers must not insert it.
+   */
+
+  if (((a->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_DEADLINE &&
+       !a_dl) ||
+      ((b->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_DEADLINE &&
+       !b_dl))
+    {
+      return false;
+    }
+
+  if (a_dl != b_dl)
+    {
+      return a_dl;
+    }
+
+  if (a_dl)
+    {
+      if (a->deadline->abs_deadline != b->deadline->abs_deadline)
+        {
+          return a->deadline->abs_deadline < b->deadline->abs_deadline;
+        }
+
+      return a->deadline->runnable_seq < b->deadline->runnable_seq;
+    }
+
+  return a->sched_priority > b->sched_priority;
+}
+
+/* Insert tcb into a runnable or pending queue. Same list mechanics as
+ * nxsched_add_prioritized(), but the stop condition is the runnable
+ * order above. Returns true only when tcb becomes list->head.
+ * An ineligible deadline TCB is not linked and does not become a
+ * normal-priority task. Wait queues must keep using
+ * nxsched_add_prioritized().
+ */
+
+static inline_function bool nxsched_add_runnable(FAR struct tcb_s *tcb,
+                                                 DSEG dq_queue_t *list)
+{
+  FAR struct tcb_s *next;
+  FAR struct tcb_s *prev;
+  bool ret = false;
+
+  if ((tcb->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_DEADLINE &&
+      !nxsched_deadline_eligible(tcb))
+    {
+      return false;
+    }
+
+  if (!nxsched_deadline_eligible(tcb))
+    {
+      DEBUGASSERT(tcb->sched_priority >= SCHED_PRIORITY_MIN);
+    }
+
+  for (next = (FAR struct tcb_s *)list->head;
+       (next && !nxsched_runnable_precedes(tcb, next));
+       next = next->flink)
+    {
+    }
+
+  if (next == NULL)
+    {
+      prev = (FAR struct tcb_s *)list->tail;
+      if (prev == NULL)
+        {
+          tcb->flink = NULL;
+          tcb->blink = NULL;
+          list->head = (FAR dq_entry_t *)tcb;
+          list->tail = (FAR dq_entry_t *)tcb;
+          ret = true;
+        }
+      else
+        {
+          tcb->flink = NULL;
+          tcb->blink = prev;
+          prev->flink = tcb;
+          list->tail = (FAR dq_entry_t *)tcb;
+        }
+    }
+  else
+    {
+      prev = next->blink;
+      if (prev == NULL)
+        {
+          tcb->flink = next;
+          tcb->blink = NULL;
+          next->blink = tcb;
+          list->head = (FAR dq_entry_t *)tcb;
+          ret = true;
+        }
+      else
+        {
+          tcb->flink = next;
+          tcb->blink = prev;
+          prev->flink = tcb;
+          next->blink = tcb;
+        }
+    }
+
+  return ret;
+}
+
+/* True when next should displace a running task whose priority is about
+ * to become sched_priority. ties == true matches the historical <= test
+ * (equal priority yields). ties == false matches the historical < test
+ * used while the scheduler is locked. An eligible deadline successor
+ * outranks any numeric priority, including 255. Idle never does.
+ */
+
+static inline_function bool
+nxsched_deadline_outranks_priority(FAR const struct tcb_s *next,
+                                   int sched_priority, bool ties)
+{
+  if (is_idle_task(next))
+    {
+      return false;
+    }
+
+  if ((next->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_DEADLINE)
+    {
+      DEBUGASSERT(nxsched_deadline_eligible(next));
+      return nxsched_deadline_eligible(next);
+    }
+
+  if (ties)
+    {
+      return sched_priority <= next->sched_priority;
+    }
+
+  return sched_priority < next->sched_priority;
+}
+
+#endif /* CONFIG_SCHED_DEADLINE */
 
 #  ifdef CONFIG_SMP
 
