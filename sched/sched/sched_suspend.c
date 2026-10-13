@@ -186,6 +186,9 @@ void nxsched_suspend(FAR struct tcb_s *tcb)
       else
 #endif
         {
+#ifdef CONFIG_SCHED_DEADLINE
+          nxsched_deadline_blocked(tcb);
+#endif
           switch_needed = nxsched_remove_readytorun(tcb);
 
           if (switch_needed)

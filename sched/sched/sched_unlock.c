@@ -170,6 +170,20 @@ void sched_unlock(void)
             }
 #endif
 
+#ifdef CONFIG_SCHED_DEADLINE
+          /* A deadline task that exhausted its budget while preemption
+           * was locked is throttled here, on the 1 -> 0 transition.
+           * Nested unlocks do not reach this block. The excess stays
+           * in overrun_ns until a later post repays it. This call
+           * cannot undo the time already executed inside the lock.
+           */
+
+          if (nxsched_deadline_release_lock(rtcb))
+            {
+              up_switch_context(this_task(), rtcb);
+            }
+#endif
+
           leave_critical_section_notrace(flags);
         }
       else

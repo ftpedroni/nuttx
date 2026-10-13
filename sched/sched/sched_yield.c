@@ -27,6 +27,7 @@
 #include <nuttx/config.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/irq.h>
 
 #include "sched/sched.h"
 
@@ -55,6 +56,26 @@ int sched_yield(void)
 {
   FAR struct tcb_s *rtcb = this_task();
   int ret;
+
+#ifdef CONFIG_SCHED_DEADLINE
+  /* Same-priority rotation does not surrender an earliest deadline.
+   * Give the rest of this job back and throttle until replenishment.
+   * sched_lock() keeps the existing deferred-throttle path.
+   */
+
+  if ((rtcb->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_DEADLINE)
+    {
+      irqstate_t flags = enter_critical_section();
+
+      if (nxsched_deadline_yield(rtcb))
+        {
+          up_switch_context(this_task(), rtcb);
+        }
+
+      leave_critical_section(flags);
+      return OK;
+    }
+#endif
 
   /* This equivalent to just resetting the task priority to its current value
    * since this will cause the task to be rescheduled behind any other tasks

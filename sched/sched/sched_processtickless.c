@@ -73,7 +73,8 @@ uint32_t g_oneshot_maxticks = UINT32_MAX;
  * Private Function Prototypes
  ****************************************************************************/
 
-#if CONFIG_RR_INTERVAL > 0 || defined(CONFIG_SCHED_SPORADIC)
+#if CONFIG_RR_INTERVAL > 0 || defined(CONFIG_SCHED_SPORADIC) || \
+    defined(CONFIG_SCHED_DEADLINE)
 static clock_t nxsched_cpu_scheduler(int cpu, clock_t ticks,
                                      clock_t elapsed, bool noswitches);
 #endif
@@ -188,7 +189,8 @@ static void nxsched_wdog_expiration(wdparm_t arg)
  *
  ****************************************************************************/
 
-#if CONFIG_RR_INTERVAL > 0 || defined(CONFIG_SCHED_SPORADIC)
+#if CONFIG_RR_INTERVAL > 0 || defined(CONFIG_SCHED_SPORADIC) || \
+    defined(CONFIG_SCHED_DEADLINE)
 static clock_t nxsched_cpu_scheduler(int cpu, clock_t ticks,
                                      clock_t elapsed, bool noswitches)
 {
@@ -234,6 +236,28 @@ static clock_t nxsched_cpu_scheduler(int cpu, clock_t ticks,
        */
 
       ret = nxsched_process_sporadic(rtcb, elapsed, noswitches);
+    }
+#endif
+
+#ifdef CONFIG_SCHED_DEADLINE
+  /* Charge the interrupted task, then report the new head's delay.
+   * elapsed == 0 is the recursive query after a head change and must
+   * not open a second interval.
+   */
+
+  if (elapsed != 0)
+    {
+      nxsched_deadline_tick(!noswitches);
+    }
+
+  ntcb = current_task(cpu);
+  if ((ntcb->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_DEADLINE)
+    {
+      ret = nxsched_deadline_timeslice(ntcb);
+      if (ret == 0 && noswitches)
+        {
+          ret = 1;
+        }
     }
 #endif
 
@@ -288,7 +312,8 @@ clock_t nxsched_process_scheduler(clock_t ticks, clock_t elapsed,
                                   bool noswitches)
 {
   clock_t minslice = CLOCK_MAX;
-#if CONFIG_RR_INTERVAL > 0 || defined(CONFIG_SCHED_SPORADIC)
+#if CONFIG_RR_INTERVAL > 0 || defined(CONFIG_SCHED_SPORADIC) || \
+    defined(CONFIG_SCHED_DEADLINE)
   irqstate_t flags = enter_critical_section();
   clock_t timeslice;
   int i;

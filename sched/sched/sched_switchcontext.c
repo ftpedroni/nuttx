@@ -97,4 +97,12 @@ void nxsched_switch_context(FAR struct tcb_s *from, FAR struct tcb_s *to)
   sched_note_suspend(from);
   sched_note_resume(to);
 #endif
+
+#ifdef CONFIG_SCHED_DEADLINE
+  /* Account 'from' and open an interval for 'to'. Architecture code
+   * already calls this hook. Do not add another one.
+   */
+
+  nxsched_deadline_switch(from, to);
+#endif
 }

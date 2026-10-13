@@ -184,6 +184,14 @@ void nxsched_process_timer(void)
 
   nxsched_process_scheduler();
 
+#ifdef CONFIG_SCHED_DEADLINE
+  /* Charge the task that was interrupted, not the ready-list head.
+   * The replenishment watchdog runs later, from wd_timer().
+   */
+
+  nxsched_deadline_tick(true);
+#endif
+
   /* Process watchdogs */
 
 #ifdef CONFIG_HRTIMER
