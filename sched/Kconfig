@@ -659,10 +659,23 @@ config SCHED_DEADLINE
 	default n
 	depends on !SMP
 	---help---
-		Reserve a policy encoding for a future uniprocessor EDF/CBS
-		SCHED_DEADLINE implementation. This option does not activate
-		the policy: sched_setscheduler() rejects SCHED_DEADLINE, and
-		no task is created with the deadline encoding.
+		Uniprocessor EDF/CBS SCHED_DEADLINE. sched_setattr() accepts
+		only an implicit deadline: runtime > 0, runtime <= deadline,
+		and deadline == period, within the admission cap.
+		sched_setscheduler() does not select this policy. Time executed
+		past the budget while preemption is locked is carried as debt
+		and repaid by later posts. That excess cannot be stopped while
+		the lock is held. This option is not a claim of physical
+		isolation on a simulator or on hardware.
+
+config SCHED_DEADLINE_TRACE
+	bool "Diagnostic CBS event trace"
+	default n
+	depends on SCHED_DEADLINE
+	---help---
+		Record charge, throttle, replenishment, block, wake, and
+		switch events in a fixed buffer. This does not change CBS
+		decisions. It is for a diagnostic image only.
 
 config TASK_NAME_SIZE
 	int "Maximum task name size"

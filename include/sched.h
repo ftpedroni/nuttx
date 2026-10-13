@@ -53,9 +53,10 @@
 #define SCHED_DEADLINE            6  /* Deadline scheduling policy */
 
 /* SCHED_DEADLINE is always visible so callers can name policy 6.
- * It is not a selectable policy yet: sched_setscheduler() rejects it,
- * and no TCB is created with the deadline encoding. The parameters
- * and the EDF/CBS engine are intentionally absent.
+ * sched_setscheduler() rejects it. sched_setattr() can name the policy
+ * only when CONFIG_SCHED_DEADLINE is set, and even a valid request is
+ * refused until the EDF/CBS engine exists. No TCB is created with the
+ * deadline encoding.
  */
 
 /* Maximum number of SCHED_SPORADIC replenishments */
@@ -210,6 +211,36 @@ struct sched_param
 #endif
 };
 
+/* Linux-shaped scheduling attributes. This is not the Linux ABI.
+ * The three time fields are nanoseconds. v0 accepts only a buffer
+ * whose size is exactly SCHED_ATTR_SIZE_VER0; smaller or larger
+ * sizes are rejected and are not read or written.
+ * Visible only with CONFIG_SCHED_DEADLINE. v0 accepts a deadline
+ * task only when runtime > 0, runtime <= deadline, and
+ * deadline == period. A shorter deadline is -EINVAL and does not
+ * change an existing reservation. sched_setattr() also enforces the
+ * admission cap. Time spent past the budget while preemption is
+ * locked is debt: later posts repay it. The scheduler cannot take
+ * that interval back while the lock is held. This is not a statement
+ * about physical isolation on a simulator or on hardware.
+ */
+
+#ifdef CONFIG_SCHED_DEADLINE
+struct sched_attr
+{
+  uint32_t size;            /* Must be SCHED_ATTR_SIZE_VER0 */
+  uint32_t sched_policy;    /* SCHED_* value */
+  uint64_t sched_flags;     /* v0: must be 0 */
+  int32_t  sched_nice;      /* v0: must be 0 */
+  uint32_t sched_priority;  /* Deadline: must be 0. Others: NuttX priority */
+  uint64_t sched_runtime;   /* Deadline runtime, nanoseconds */
+  uint64_t sched_deadline;  /* Deadline relative deadline, nanoseconds */
+  uint64_t sched_period;    /* Deadline period, nanoseconds */
+};
+
+#define SCHED_ATTR_SIZE_VER0 sizeof(struct sched_attr)
+#endif
+
 /****************************************************************************
  * Public Data
  ****************************************************************************/
@@ -256,6 +287,71 @@ int    sched_yield(void);
 int    sched_get_priority_max(int policy);
 int    sched_get_priority_min(int policy);
 int    sched_rr_get_interval(pid_t pid, FAR struct timespec *interval);
+
+#ifdef CONFIG_SCHED_DEADLINE
+int    sched_setattr(pid_t pid, FAR const struct sched_attr *attr,
+                     unsigned int flags);
+int    sched_getattr(pid_t pid, FAR struct sched_attr *attr,
+                     unsigned int size, unsigned int flags);
+
+/* Exercised by apps/testing/sched/deadline. The order, CBS, and
+ * admission tests use synthetic TCBs. The view below is how the live
+ * task tests read a reservation without changing it.
+ */
+
+#  ifdef CONFIG_TESTING_DEADLINE
+struct sched_deadline_view_s
+{
+  uint64_t runtime_ns;
+  uint64_t deadline_ns;
+  uint64_t period_ns;
+  uint64_t remaining_ns;
+  uint64_t abs_deadline;
+  uint64_t overrun_ns;
+  uint64_t runnable_seq;
+  uint32_t admitted_ppm;
+  uint8_t  sched;
+  uint8_t  flags;
+};
+
+int      sched_deadline_order_test(void);
+int      sched_deadline_cbs_test(void);
+int      sched_deadline_time_test(void);
+int      sched_deadline_admit_test(void);
+int      sched_deadline_oracle_test(void);
+
+struct sched_deadline_t9_s
+{
+  int      tick_irq;
+  int      tick_running;
+  int      tick_head;
+  uint64_t tick_now;
+  uint64_t tick_rem;
+  int      sw_irq;
+  int      sw_from;
+  int      sw_to;
+  int      sw_running;
+  int      sw_head;
+  uint64_t sw_now;
+  uint64_t sw_from_before;
+  uint64_t sw_from_after;
+  uint64_t sw_to_before;
+  uint64_t sw_to_after;
+};
+
+void     sched_deadline_t9_expect(pid_t low, pid_t high);
+int      sched_deadline_t9_kick(FAR void *sem);
+void     sched_deadline_t9_read(FAR struct sched_deadline_t9_s *out);
+int      sched_deadline_view(pid_t pid,
+                             FAR struct sched_deadline_view_s *view);
+uint32_t sched_deadline_admitted(void);
+#    ifdef CONFIG_SCHED_DEADLINE_TRACE
+void     sched_deadline_trace_reset(void);
+void     sched_deadline_trace_freeze(void);
+void     sched_deadline_trace_report(uint64_t t0, uint64_t t1);
+#    endif
+#  endif
+#endif
 
 #ifdef CONFIG_SMP
 /* Task affinity */

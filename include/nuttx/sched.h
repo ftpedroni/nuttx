@@ -99,10 +99,12 @@
 #  define TCB_FLAG_SCHED_RR        (1 << TCB_FLAG_POLICY_SHIFT)  /* Round robin scheding policy */
 #  define TCB_FLAG_SCHED_SPORADIC  (2 << TCB_FLAG_POLICY_SHIFT)  /* Sporadic scheding policy */
 
-/* Encoding 3 is reserved for a future uniprocessor SCHED_DEADLINE.
- * The macro is compiled only with CONFIG_SCHED_DEADLINE. Nothing in
- * this tree stores it in a TCB: sched_setscheduler() does not accept
- * the policy, and task creation still writes FIFO, RR, or sporadic.
+/* Encoding 3 is reserved for uniprocessor SCHED_DEADLINE.
+ * The macro is compiled only with CONFIG_SCHED_DEADLINE. Production
+ * paths do not store it: sched_setscheduler() rejects the policy,
+ * sched_setattr() refuses a valid request, and task creation still
+ * writes FIFO, RR, or sporadic. Ordering tests may set it on fixtures
+ * that are not scheduled.
  */
 
 #ifdef CONFIG_SCHED_DEADLINE
@@ -279,6 +281,9 @@ enum tstate_e
 #ifdef CONFIG_SIG_SIGSTOP_ACTION
   TSTATE_TASK_STOPPED,        /* BLOCKED      - Waiting for SIGCONT */
 #endif
+#ifdef CONFIG_SCHED_DEADLINE
+  TSTATE_WAIT_DLTHROTTLE,     /* BLOCKED      - CBS budget exhausted */
+#endif
 
   NUM_TASK_STATES,
   TSTATE_SLEEPING = TSTATE_WAIT_SIG /* Map TSTATE_SLEEPING to TSTATE_WAIT_SIG */
@@ -359,6 +364,59 @@ struct sporadic_s
 };
 
 #endif /* CONFIG_SCHED_SPORADIC */
+
+/* struct deadline_s ********************************************************/
+
+/* Reservation parameters, the runnable EDF key, and CBS server state.
+ * Times are nanoseconds of the monotonic scheduler clock.
+ * abs_deadline is the absolute scheduling deadline d.
+ * runnable_seq is the admission order among equal absolute deadlines.
+ * CBS does not assign that sequence. A later activation step does,
+ * on a block-to-runnable transition, and must not change it when a
+ * pending task is merged onto the ready list.
+ *
+ * The public scheduler does not allocate this structure. Every live
+ * task still has a NULL deadline pointer. Internal admission tests may
+ * attach a private object; that object is not scheduled.
+ * DEADLINE_FLAG_SCHEDULABLE is set only when sched_setattr() publishes
+ * the policy. Synthetic fixtures leave it clear. The policy flag alone is not
+ * eligibility. charge_ppm is the one ledger share of a reserved object.
+ * owner is the TCB allowed to release it, so a shallow TCB copy does
+ * not become a second reservation.
+ */
+
+#ifdef CONFIG_SCHED_DEADLINE
+#define DEADLINE_FLAG_KEY_VALID        (1u << 0)
+#define DEADLINE_FLAG_EXECUTING        (1u << 1)
+#define DEADLINE_FLAG_THROTTLE_PENDING (1u << 2)
+#define DEADLINE_FLAG_SCHEDULABLE      (1u << 3)
+#define DEADLINE_FLAG_RESERVED         (1u << 4)
+
+#define DL_SCHED_INACTIVE              0
+#define DL_SCHED_ELIGIBLE              1
+#define DL_SCHED_BLOCKED               2
+#define DL_SCHED_THROTTLED             3
+#define DL_SCHED_STOPPED               4
+
+struct deadline_s
+{
+  uint64_t runtime_ns;       /* Q, configured runtime */
+  uint64_t deadline_ns;      /* D, configured relative deadline */
+  uint64_t period_ns;        /* P, configured period */
+  uint64_t abs_deadline;     /* d, absolute scheduling deadline */
+  uint64_t remaining_ns;     /* q, executable credit, never negative */
+  uint64_t overrun_ns;       /* Unpaid excess. The next post subtracts it from one Q */
+  uint64_t accounted_ns;     /* Last now already charged */
+  uint64_t runnable_seq;     /* Equal-deadline tie, smaller first */
+  uint32_t generation;       /* Watchdog generation */
+  uint32_t replenish_count;  /* Times the callback applied a refill */
+  uint8_t  flags;
+  uint8_t  sched;            /* DL_SCHED_* */
+  struct wdog_s replenish;
+  uint32_t charge_ppm;       /* One ledger share, parts per million */
+  FAR struct tcb_s *owner;   /* TCB that may release this object */
+};
+#endif
 
 /* struct child_status_s ****************************************************/
 
@@ -661,6 +719,9 @@ struct tcb_s
 #endif
 #ifdef CONFIG_SCHED_SPORADIC
   FAR struct sporadic_s *sporadic;       /* Sporadic scheduling parameters  */
+#endif
+#ifdef CONFIG_SCHED_DEADLINE
+  FAR struct deadline_s *deadline;       /* NULL on every live task         */
 #endif
 
   struct wdog_s waitdog;                 /* All timed waits use this timer  */
